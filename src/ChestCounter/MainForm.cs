@@ -209,7 +209,7 @@ public sealed class MainForm : Form
 
     private const int DesignW = 592, DesignHBase = 332, DesignHTeam = 416;
     /// <summary>Alto de la tarjeta del token (tres líneas: estado, probabilidad y cofres contados).</summary>
-    private const int PirateH = 58;
+    private const int PirateH = 42;
     private int _designH = DesignHBase;
     private readonly Dictionary<Control, LayoutEntry> _layout = new();
     private System.Windows.Forms.Timer? _scaleTimer;
@@ -372,12 +372,14 @@ public sealed class MainForm : Form
         }
         _daily.SetDays(st.LastDays);
         var pirateAlert = s.PirateTokenLive || st.LastMatch?.PirateToken == true;
-        var status = pirateAlert
+        // Sin detección: solo la probabilidad. Con token detectado: el aviso encima.
+        var chance = s.Odds is { } odds ? OddsText(odds) : "";
+        _pirateLabel.Text = pirateAlert
             ? (s.PirateTokenLive ? L.T("★ TOKEN PIRATA · Detectado en esta partida", "★ PIRATE TOKEN · Detected in this match")
                 : L.T("★ TOKEN PIRATA · Detectado en la partida anterior", "★ PIRATE TOKEN · Detected in the previous match"))
                 + "  ·  " + (s.TokenDetails ?? L.T("Ver detalles en Tesoros →", "View details in Treasures →"))
-            : L.T("TOKEN DE TIENDA PIRATA · Sin detecciones · Ver Tesoros →", "PIRATE SHOP TOKEN · No detections · View Treasures →");
-        _pirateLabel.Text = s.Odds is { } odds ? status + "\n" + OddsText(odds) : status;
+                + (chance.Length > 0 ? "\n" + chance : "")
+            : chance;
         _pirateLabel.ForeColor = pirateAlert ? Theme.Amber : Theme.Muted;
         SetBottomPanels(s.Team != null, true);
         RenderTeam(s.Team);
@@ -480,19 +482,13 @@ public sealed class MainForm : Form
     }
 
     /// <summary>
-    /// Dos líneas de la tarjeta del token: probabilidad de haberlo conseguido (con el siguiente hito) y de dónde
-    /// salen los cofres contados.
+    /// Línea del token: tu probabilidad con tus cofres (añadidos incluidos) y la suposición en escuadra
+    /// (4 jugadores que abren tantos cofres como tú).
     /// </summary>
     private static string OddsText(TokenOdds odds)
     {
         string Pct(double p) => (p * 100).ToString(p < 0.001 ? "0.###" : p < 0.1 ? "0.00" : "0.0", L.Culture) + " %";
-        var chance = odds.NextMilestone is { } next
-            ? L.F("Probabilidad de haberlo conseguido: {0}  ·  {1} a los {2} cofres", "Chance of having got it: {0}  ·  {1} at {2} chests",
-                Pct(odds.Chance), Pct(next), TokenOdds.ChestsFor(next).ToString("#,0", L.Culture))
-            : L.F("Probabilidad de haberlo conseguido: {0}", "Chance of having got it: {0}", Pct(odds.Chance));
-        var chests = L.F("{0} cofres: tú {1} · compañeros ≥ {2} · añadidos {3}", "{0} chests: you {1} · teammates ≥ {2} · added {3}",
-            odds.Chests.ToString("#,0", L.Culture), odds.Own.ToString("#,0", L.Culture), odds.Mates.ToString("#,0", L.Culture), odds.Added.ToString("#,0", L.Culture));
-        return chance + "\n" + chests;
+        return L.F("Probabilidad del token: {0}  ·  En escuadra: {1}", "Token chance: {0}  ·  In a squad: {1}", Pct(odds.Solo), Pct(odds.Squad));
     }
 
     /// <summary>Detalle por jugador de las últimas partidas (clic en «Última partida» o en «Equipo»).</summary>

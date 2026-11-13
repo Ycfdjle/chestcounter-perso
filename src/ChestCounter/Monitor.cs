@@ -29,6 +29,15 @@ public sealed record TokenOdds(long Own, long Mates, long Added)
 
     public long Chests => Own + Mates + Added;
 
+    /// <summary>Tus cofres: los de tus replays más los añadidos a mano.</summary>
+    public long Mine => Own + Added;
+
+    /// <summary>Tu probabilidad de haber conseguido el token con tus cofres.</summary>
+    public double Solo => Probability(Mine);
+
+    /// <summary>Suposición en escuadra: 4 jugadores que abren cada uno tantos cofres como tú.</summary>
+    public double Squad => Probability(Mine * 4);
+
     /// <summary>Probabilidad de al menos un token: 1 − (1 − 1/137 500)^cofres.</summary>
     public double Chance => Probability(Chests);
 

@@ -394,5 +394,6 @@ internal static class Translations
         ["Probabilidad de haberlo conseguido: {0}  ·  {1} a los {2} cofres"] = new[] { "", "", "Chance de l'avoir eu : {0}  ·  {1} à {2} coffres", "", "", "", "", "" },
         ["Probabilidad de haberlo conseguido: {0}"] = new[] { "", "", "Chance de l'avoir eu : {0}", "", "", "", "", "" },
         ["{0} cofres: tú {1} · compañeros ≥ {2} · añadidos {3}"] = new[] { "", "", "{0} coffres : toi {1} · mates ≥ {2} · ajoutés {3}", "", "", "", "", "" },
+        ["Probabilidad del token: {0}  ·  En escuadra: {1}"] = new[] { "", "", "Chance du jeton : {0}  ·  En squad : {1}", "", "", "", "", "" },
     };
 }
