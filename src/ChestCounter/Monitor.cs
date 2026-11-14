@@ -20,7 +20,7 @@ public sealed record MonitorState(OverlayView View, IReadOnlyList<Profile> Profi
 /// añadidos a mano. Tasa oficial de Epic en partida normal: 1 entre 137 500 por cofre (las Treasure Hours no se
 /// tienen en cuenta).
 /// </summary>
-public sealed record TokenOdds(long Own, long Mates, long Added)
+public sealed record TokenOdds(long Own, long Mates, long Added, double MineLog = double.NaN, long Boosted = 0)
 {
     public const double PerChest = 1.0 / 137_500;
 
@@ -32,11 +32,17 @@ public sealed record TokenOdds(long Own, long Mates, long Added)
     /// <summary>Tus cofres: los de tus replays más los añadidos a mano.</summary>
     public long Mine => Own + Added;
 
+    /// <summary>
+    /// Log de la probabilidad de NO conseguirlo con tus cofres: cada partida jugada en hora tesoro cuenta con su
+    /// multiplicador. NaN = sin horas tesoro (todo a la tasa normal).
+    /// </summary>
+    private double Log => double.IsNaN(MineLog) ? Mine * Math.Log(1 - PerChest) : MineLog;
+
     /// <summary>Tu probabilidad de haber conseguido el token con tus cofres.</summary>
-    public double Solo => Probability(Mine);
+    public double Solo => 1 - Math.Exp(Log);
 
     /// <summary>Suposición en escuadra: 4 jugadores que abren cada uno tantos cofres como tú.</summary>
-    public double Squad => Probability(Mine * 4);
+    public double Squad => 1 - Math.Exp(4 * Log);
 
     /// <summary>Probabilidad de al menos un token: 1 − (1 − 1/137 500)^cofres.</summary>
     public double Chance => Probability(Chests);
@@ -302,6 +308,12 @@ public sealed class Monitor
             }
         }
     }
+
+    /// <summary>Heures trésor utilisées (celles du joueur, ou la liste intégrée).</summary>
+    public IReadOnlyList<TreasureHour> TreasureHours => _config.TreasureHourList;
+
+    /// <summary>Remplace les heures trésor (null = revenir à la liste intégrée) et recalcule la chance.</summary>
+    public void SetTreasureHours(List<TreasureHour>? hours) => Change(c => c.TreasureHours = hours);
 
     /// <summary>Máximo de cofres añadidos a mano (el mismo que en Ajustes).</summary>
     public const int MaxInitialChests = 1_000_000;
@@ -670,14 +682,25 @@ public sealed class Monitor
     private TokenOdds BuildTokenOdds(MatchRecord? live)
     {
         var kinds = _config.ExtraKinds();
+        var hours = _config.TreasureHourList;
         var matches = Profiles.View(_data, _config).Matches;
-        long own = 0, mates = 0;
+        var added = Profiles.InitialChests(_data, _config);
+        long own = 0, mates = 0, boosted = 0;
+        // Les coffres ajoutés à la main n'ont pas d'heure : taux normal. Une partie compte comme « heure trésor »
+        // si elle a commencé pendant une fenêtre.
+        var log = added * Math.Log(1 - TokenOdds.PerChest);
         foreach (var m in live != null && _tracker.IsLive ? matches.Append(live) : matches)
         {
             own += m.OwnChests;
             mates += m.TeammatesSeen(kinds);
+            var multiplier = TreasureHour.Find(hours, m.MatchStartUtc ?? m.AnalyzedAtUtc)?.Multiplier ?? 1;
+            if (multiplier > 1)
+            {
+                boosted += m.OwnChests;
+            }
+            log += m.OwnChests * Math.Log(1 - Math.Min(TokenOdds.PerChest * multiplier, 0.5));
         }
-        return new TokenOdds(own, mates, Profiles.InitialChests(_data, _config));
+        return new TokenOdds(own, mates, added, log, boosted);
     }
 
     private string? BuildTokenDetails(MatchRecord? live)

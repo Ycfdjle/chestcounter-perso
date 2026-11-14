@@ -188,6 +188,46 @@ public sealed class MatchRecord
     }
 }
 
+/// <summary>
+/// Heure trésor (Treasure Hour) : fenêtre où Epic multiplie la chance du token pirate par coffre.
+/// Les heures sont en UTC ; la fenêtre affiche et saisit l'heure locale.
+/// </summary>
+public sealed class TreasureHour
+{
+    public DateTime StartUtc { get; set; }
+    public DateTime EndUtc { get; set; }
+
+    /// <summary>Multiplicateur de la chance du token (1,5 = 1 sur 91 667 au lieu de 1 sur 137 500).</summary>
+    public double Multiplier { get; set; } = 1.5;
+
+    public bool Contains(DateTime utc) => utc >= StartUtc && utc < EndUtc;
+
+    /// <summary>La fenêtre qui contient ce moment (la plus forte si plusieurs se chevauchent), ou null.</summary>
+    public static TreasureHour? Find(IEnumerable<TreasureHour> hours, DateTime utc) =>
+        hours.Where(h => h.Contains(utc)).OrderByDescending(h => h.Multiplier).FirstOrDefault();
+
+    /// <summary>
+    /// Horaires connus de la mini-saison Treasure Hunters : chaque samedi, 19:00–21:00 UTC et 02:00–04:00 UTC la
+    /// nuit suivante (20 h–22 h et 3 h–5 h à Paris), ×1,5. Le 7 novembre, la 2ᵉ session était ×2. Les samedis à
+    /// venir sont ceux annoncés comme prévus ; ils se modifient dans « Heures trésor ».
+    /// </summary>
+    public static IReadOnlyList<TreasureHour> Defaults { get; } = BuildDefaults();
+
+    private static List<TreasureHour> BuildDefaults()
+    {
+        var list = new List<TreasureHour>();
+        foreach (var saturday in new[] { new DateTime(2026, 11, 7), new DateTime(2026, 11, 14), new DateTime(2026, 11, 21), new DateTime(2026, 11, 28), new DateTime(2026, 12, 5) })
+        {
+            var day = DateTime.SpecifyKind(saturday, DateTimeKind.Utc);
+            list.Add(new TreasureHour { StartUtc = day.AddHours(19), EndUtc = day.AddHours(21), Multiplier = 1.5 });
+            list.Add(new TreasureHour { StartUtc = day.AddHours(26), EndUtc = day.AddHours(28), Multiplier = saturday.Day == 7 ? 2 : 1.5 });
+        }
+        return list;
+    }
+
+    public TreasureHour Copy() => new() { StartUtc = StartUtc, EndUtc = EndUtc, Multiplier = Multiplier };
+}
+
 public sealed class Config
 {
     /// <summary>
@@ -269,6 +309,15 @@ public sealed class Config
     /// type the real number in the match details. Replaced as a whole on each change (never edited in place).
     /// </summary>
     public Dictionary<string, Dictionary<string, int>> MateCorrections { get; set; } = new();
+
+    /// <summary>
+    /// Heures trésor modifiées par le joueur ; null = la liste intégrée (<see cref="TreasureHour.Defaults"/>).
+    /// Remplacée en entier à chaque changement.
+    /// </summary>
+    public List<TreasureHour>? TreasureHours { get; set; }
+
+    [JsonIgnore]
+    public IReadOnlyList<TreasureHour> TreasureHourList => TreasureHours ?? TreasureHour.Defaults;
 
     /// <summary>Non-chest kinds the player chose to add to the chest total.</summary>
     public IReadOnlyCollection<string> ExtraKinds()

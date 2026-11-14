@@ -36,6 +36,9 @@ public sealed class MainForm : Form
     private readonly Label _lastValue, _lastDetail;
     private readonly Card _teamCard, _pirateCard;
     private readonly Label _pirateLabel;
+    private readonly PillButton _hoursButton;
+    private readonly System.Windows.Forms.Timer _hourTimer;
+    private MonitorState? _lastState;
     private bool _teamShown, _pirateShown;
     private readonly Label _teamTitle, _teamTotal, _teamMessage;
     private readonly Label[] _teamNames = new Label[TeamColumns], _teamValues = new Label[TeamColumns];
@@ -136,7 +139,7 @@ public sealed class MainForm : Form
         _pirateCard = new Card { Location = new Point(LeftX, 334), Size = new Size(RightX + RightW - LeftX, PirateH), Radius = 14, BackColor = Theme.Panel, Visible = false };
         _pirateLabel = new Label
         {
-            Bounds = new Rectangle(13, 0, _pirateCard.Width - 26, PirateH), Font = Theme.Text(8.5f, FontStyle.Bold),
+            Bounds = new Rectangle(13, 0, _pirateCard.Width - 26 - 96, PirateH), Font = Theme.Text(8.5f, FontStyle.Bold),
             ForeColor = Theme.Amber, BackColor = _pirateCard.BackColor, TextAlign = ContentAlignment.MiddleCenter,
             AutoEllipsis = true,
         };
@@ -144,7 +147,27 @@ public sealed class MainForm : Form
         _pirateCard.Cursor = _pirateLabel.Cursor = Cursors.Hand;
         _pirateCard.Click += (_, _) => Open(new Uri(_store.ReportPath).AbsoluteUri + "#tesoros");
         _pirateLabel.Click += (_, _) => Open(new Uri(_store.ReportPath).AbsoluteUri + "#tesoros");
+        // « Heures » : les heures trésor (chance du token multipliée), à consulter et compléter.
+        _hoursButton = new PillButton
+        {
+            Text = L.T("⏰ Horas", "⏰ Hours"),
+            Location = new Point(_pirateCard.Width - 13 - 90, (PirateH - 24) / 2),
+            Size = new Size(90, 24),
+            Radius = 9,
+            Font = Theme.Text(8f, FontStyle.Bold),
+            ForeColor = Theme.Amber,
+        };
+        _hoursButton.Click += (_, _) =>
+        {
+            using var dialog = new TreasureHoursForm(_monitor);
+            dialog.ShowDialog(this);
+        };
+        _pirateCard.Controls.Add(_hoursButton);
         Controls.Add(_pirateCard);
+        // L'heure trésor commence ou finit sans nouvelle partie : la carte se met à jour toutes les 30 s.
+        _hourTimer = new System.Windows.Forms.Timer { Interval = 30_000 };
+        _hourTimer.Tick += (_, _) => { if (_lastState != null) RenderPirate(_lastState); };
+        _hourTimer.Start();
 
         // Equipo (con «Compañeros» activado): tus cofres y los vistos de cada compañero en la partida actual o la última.
         // Solo se ve con la opción activada; entonces la ventana crece para hacerle sitio.
@@ -371,16 +394,8 @@ public sealed class MainForm : Form
             _lastDetail.Text = "";
         }
         _daily.SetDays(st.LastDays);
-        var pirateAlert = s.PirateTokenLive || st.LastMatch?.PirateToken == true;
-        // Sin detección: solo la probabilidad. Con token detectado: el aviso encima.
-        var chance = s.Odds is { } odds ? OddsText(odds) : "";
-        _pirateLabel.Text = pirateAlert
-            ? (s.PirateTokenLive ? L.T("★ TOKEN PIRATA · Detectado en esta partida", "★ PIRATE TOKEN · Detected in this match")
-                : L.T("★ TOKEN PIRATA · Detectado en la partida anterior", "★ PIRATE TOKEN · Detected in the previous match"))
-                + "  ·  " + (s.TokenDetails ?? L.T("Ver detalles en Tesoros →", "View details in Treasures →"))
-                + (chance.Length > 0 ? "\n" + chance : "")
-            : chance;
-        _pirateLabel.ForeColor = pirateAlert ? Theme.Amber : Theme.Muted;
+        _lastState = s;
+        RenderPirate(s);
         SetBottomPanels(s.Team != null, true);
         RenderTeam(s.Team);
 
@@ -489,6 +504,49 @@ public sealed class MainForm : Form
     {
         string Pct(double p) => (p * 100).ToString(p < 0.001 ? "0.###" : p < 0.1 ? "0.00" : "0.0", L.Culture) + " %";
         return L.F("Probabilidad del token: {0}  ·  En escuadra: {1}", "Token chance: {0}  ·  In a squad: {1}", Pct(odds.Solo), Pct(odds.Squad));
+    }
+
+    /// <summary>
+    /// Carte du token : sans détection, la chance puis l'heure trésor (en cours ou la prochaine) ; avec un token
+    /// détecté, l'alerte puis la chance.
+    /// </summary>
+    private void RenderPirate(MonitorState s)
+    {
+        var pirateAlert = s.PirateTokenLive || s.Stats.LastMatch?.PirateToken == true;
+        var chance = s.Odds is { } odds ? OddsText(odds) : "";
+        var now = DateTime.UtcNow;
+        var hours = _monitor.TreasureHours;
+        var active = TreasureHour.Find(hours, now);
+        if (pirateAlert)
+        {
+            _pirateLabel.Text = (s.PirateTokenLive ? L.T("★ TOKEN PIRATA · Detectado en esta partida", "★ PIRATE TOKEN · Detected in this match")
+                    : L.T("★ TOKEN PIRATA · Detectado en la partida anterior", "★ PIRATE TOKEN · Detected in the previous match"))
+                + "  ·  " + (s.TokenDetails ?? L.T("Ver detalles en Tesoros →", "View details in Treasures →"))
+                + (chance.Length > 0 ? "\n" + chance : "");
+            _pirateLabel.ForeColor = Theme.Amber;
+            return;
+        }
+        string hour;
+        if (active != null)
+        {
+            hour = L.F("⏰ Hora tesoro en curso (×{0}) hasta las {1}", "⏰ Treasure Hour now (×{0}) until {1}",
+                active.Multiplier.ToString("0.##", L.Culture), active.EndUtc.ToLocalTime().ToString("HH:mm", L.Culture));
+        }
+        else if (hours.Where(h => h.StartUtc > now).OrderBy(h => h.StartUtc).FirstOrDefault() is { } next)
+        {
+            hour = L.F("Próxima hora tesoro: {0} (×{1})", "Next Treasure Hour: {0} (×{1})",
+                L.DateTimeShort(next.StartUtc.ToLocalTime()), next.Multiplier.ToString("0.##", L.Culture));
+        }
+        else
+        {
+            hour = L.T("Ninguna hora tesoro prevista", "No Treasure Hour planned");
+        }
+        if (s.Odds is { Boosted: > 0 } boosted)
+        {
+            hour += "  ·  " + L.F("{0} cofres en hora tesoro", "{0} chests in Treasure Hours", L.N((int)Math.Min(boosted.Boosted, int.MaxValue)));
+        }
+        _pirateLabel.Text = chance.Length > 0 ? chance + "\n" + hour : hour;
+        _pirateLabel.ForeColor = active != null ? Theme.Amber : Theme.Muted;
     }
 
     /// <summary>Detalle por jugador de las últimas partidas (clic en «Última partida» o en «Equipo»).</summary>
