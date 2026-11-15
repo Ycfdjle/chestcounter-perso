@@ -792,7 +792,7 @@ public sealed class Monitor
     /// </summary>
     private TeamSummary? BuildTeam()
     {
-        if (!_config.ShowTeammates)
+        if (!_config.ShowTeammates && !_config.SquadSync)
         {
             return null;
         }
@@ -803,8 +803,16 @@ public sealed class Monitor
         {
             return null;
         }
+        // Synchro squad : le vrai nombre envoyé par le mate (✓), sinon sa correction à la main (✎), sinon le minimum vu (≥).
+        Dictionary<string, int>? synced = null;
+        if (_config.SquadSync)
+        {
+            _config.SquadCounts?.TryGetValue(m.SessionId, out synced);
+        }
         var mates = (m.Teammates ?? new List<TeammateRecord>())
-            .Select(t => new TeamMember(t.Name, MatchRecord.Seen(t, kinds), t.Override != null && !t.OverrideSynced, t.OverrideSynced))
+            .Select(t => synced != null && synced.TryGetValue(t.Key, out var exact)
+                ? new TeamMember(t.Name, exact, false, true)
+                : new TeamMember(t.Name, MatchRecord.Seen(t, kinds), t.Override != null, false))
             .OrderByDescending(t => t.Chests)
             .ToList();
         return new TeamSummary(live != null, m.OwnChests, mates, m.Teammates == null);

@@ -134,13 +134,11 @@ public static class Profiles
         {
             return null;
         }
-        Dictionary<string, int>? fixes = null, synced = null;
+        // Les comptes reçus par la synchro squad ne passent pas ici : ils s'affichent dans la carte Squad et le
+        // détail de la partie, sans jamais toucher à ton total, ta moyenne ni ta chance du jeton.
+        Dictionary<string, int>? fixes = null;
         c.MateCorrections?.TryGetValue(m.SessionId, out fixes);
-        if (c.SquadSync)
-        {
-            c.SquadCounts?.TryGetValue(m.SessionId, out synced);
-        }
-        return m.WithMateOverrides(fixes, synced).WithExtras(c.ExtraKinds(), c.CountTeammateChests, c.CountTeammateTreasures);
+        return m.WithMateOverrides(fixes).WithExtras(c.ExtraKinds(), c.CountTeammateChests, c.CountTeammateTreasures);
     }
 
     /// <summary>Estimated chests opened before the tool for a profile key ("" = before the first match).</summary>

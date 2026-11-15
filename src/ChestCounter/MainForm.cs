@@ -484,6 +484,8 @@ public sealed class MainForm : Form
         _teamMessage.Text = message ?? "";
         _teamMessage.Visible = message != null;
         _teamTotal.Text = team.Mates.Count == 0 ? ""
+            : team.Mates.All(m => m.Synced)
+                ? L.F("Squad: {0} cofres en total", "Squad: {0} chests in total", L.N(team.Total))
             : team.Total > 0
                 ? L.F("Equipo ≥ {0} · compañeros ≥ {1} %", "Team ≥ {0} · teammates ≥ {1} %", L.N(team.Total), (100.0 * team.MatesTotal / team.Total).ToString("0", L.Culture))
                 : L.F("Equipo ≥ {0}", "Team ≥ {0}", L.N(team.Total));

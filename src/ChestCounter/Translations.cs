@@ -435,5 +435,6 @@ internal static class Translations
         ["Sin conexión con el servicio de sincronización; se reintenta en un minuto."] = new[] { "", "", "Pas de connexion au service de synchro ; nouvel essai dans une minute.", "", "", "", "", "" },
         ["Error de sincronización (ver errors.log)."] = new[] { "", "", "Erreur de synchro (voir errors.log).", "", "", "", "", "" },
         ["Visto / sincronizado"] = new[] { "", "", "Vu / synchronisé", "", "", "", "", "" },
+        ["Squad: {0} cofres en total"] = new[] { "", "", "Squad : {0} coffres au total", "", "", "", "", "" },
     };
 }
