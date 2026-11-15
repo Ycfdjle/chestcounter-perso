@@ -1,4 +1,6 @@
 using System.Runtime.Versioning;
+using System.Text;
+using System.Text.Json;
 
 namespace ChestCounter;
 
@@ -59,10 +61,10 @@ public sealed record TokenOdds(long Own, long Mates, long Added, double MineLog 
 /// <summary>
 /// Un compañero y los cofres que se le vieron abrir (un mínimo), o los que escribió el jugador si los corrigió.
 /// </summary>
-public sealed record TeamMember(string Name, int Chests, bool Corrected = false);
+public sealed record TeamMember(string Name, int Chests, bool Corrected = false, bool Synced = false);
 
 /// <summary>Un compañero en el detalle de una partida: lo visto en el replay y la corrección (null = ninguna).</summary>
-public sealed record MateLine(string Key, string Name, int Seen, int? Corrected);
+public sealed record MateLine(string Key, string Name, int Seen, int? Corrected, int? Synced = null);
 
 /// <summary>
 /// Una partida en el detalle por jugador. <paramref name="Mates"/> es null si la partida se analizó antes de
@@ -148,7 +150,11 @@ public sealed class Monitor
         _data = data;
         _tracker = tracker;
         _dataDir = dataDir;
+        Squad = new SquadSync(this);
     }
+
+    /// <summary>Synchro squad (coffres exacts des mates qui ont le même code).</summary>
+    public SquadSync Squad { get; }
 
     /// <summary>Ajustes actuales (leer; los cambios se hacen con <see cref="Change"/>).</summary>
     public Config Config => _config;
@@ -185,6 +191,7 @@ public sealed class Monitor
         ObsServer.Start(_config.ObsPort > 0 ? _config.ObsPort : ObsServer.DefaultPort);
 
         new Thread(Loop) { IsBackground = true, Name = "Vigilancia" }.Start();
+        Squad.Start();
 
         // Nueva versión en GitHub: única conexión de red de la herramienta (se puede desactivar en ajustes).
         if (_config.UpdateMode != "off")
@@ -203,6 +210,7 @@ public sealed class Monitor
 
     public void Stop()
     {
+        Squad.Stop();
         ObsServer.Stop();
         _stop = true;
         _wake.Set();
@@ -315,6 +323,125 @@ public sealed class Monitor
     /// <summary>Remplace les heures trésor (null = revenir à la liste intégrée) et recalcule la chance.</summary>
     public void SetTreasureHours(List<TreasureHour>? hours) => Change(c => c.TreasureHours = hours);
 
+    /// <summary>
+    /// Parties terminées récentes (14 jours) du profil affiché, telles qu'enregistrées (coffres du joueur seul).
+    /// Appelé depuis le fil de la synchro : si la liste change pendant la lecture, l'appelant réessaie plus tard.
+    /// </summary>
+    private List<MatchRecord> SquadRecent(int max)
+    {
+        var since = DateTime.UtcNow.AddDays(-14);
+        var shown = Profiles.View(_data, _config).Matches.Select(m => m.SessionId).ToHashSet();
+        return _data.Matches.ToList()
+            .Where(m => shown.Contains(m.SessionId) && !string.IsNullOrEmpty(m.EpicId) && (m.MatchStartUtc ?? m.AnalyzedAtUtc) >= since)
+            .OrderByDescending(m => m.MatchStartUtc ?? m.AnalyzedAtUtc)
+            .Take(max)
+            .ToList();
+    }
+
+    /// <summary>Id Epic du joueur suivi (pour ignorer ses propres messages de synchro).</summary>
+    public string? SquadSelfId()
+    {
+        try
+        {
+            return SquadRecent(1).FirstOrDefault()?.EpicId;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Message de synchro : id Epic, pseudo et, pour chaque partie récente, son identifiant et ses coffres. Raccourci
+    /// pour rester sous la taille maximale. Null s'il n'y a rien à envoyer.
+    /// </summary>
+    public string? SquadPayload(int maxMatches, int maxBytes)
+    {
+        try
+        {
+            var mine = SquadRecent(maxMatches);
+            if (mine.Count == 0)
+            {
+                return null;
+            }
+            var id = mine[0].EpicId!;
+            var name = mine.FirstOrDefault(m => !string.IsNullOrEmpty(m.PlayerName))?.PlayerName ?? "";
+            var items = mine.Where(m => m.SessionId.Length is > 0 and <= 128).Select(m => new { s = m.SessionId, c = m.ChestsOpened }).ToList();
+            while (true)
+            {
+                var json = JsonSerializer.Serialize(new { v = 1, id, n = name, m = items });
+                if (Encoding.UTF8.GetByteCount(json) <= maxBytes || items.Count == 0)
+                {
+                    return json;
+                }
+                items.RemoveAt(items.Count - 1);
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Ajoute les comptes reçus des mates (partie → id Epic → coffres) et rafraîchit si quelque chose change.</summary>
+    public void MergeSquadCounts(Dictionary<string, Dictionary<string, int>> incoming, int maxSessions, IReadOnlyDictionary<string, string>? names = null)
+    {
+        if (incoming.Count == 0)
+        {
+            return;
+        }
+        var merged = new Dictionary<string, Dictionary<string, int>>(_config.SquadCounts ?? new());
+        var knownNames = new Dictionary<string, string>(_config.SquadNames ?? new());
+        var changed = false;
+        foreach (var (id, name) in names ?? new Dictionary<string, string>())
+        {
+            if (!knownNames.TryGetValue(id, out var oldName) || oldName != name)
+            {
+                knownNames[id] = name;
+                changed = true;
+            }
+        }
+        foreach (var (session, perMate) in incoming)
+        {
+            var target = merged.TryGetValue(session, out var existing) ? new Dictionary<string, int>(existing) : new Dictionary<string, int>();
+            foreach (var (mate, chests) in perMate)
+            {
+                if (!target.TryGetValue(mate, out var old) || old != chests)
+                {
+                    target[mate] = chests;
+                    changed = true;
+                }
+            }
+            merged[session] = target;
+        }
+        if (!changed)
+        {
+            return;
+        }
+        while (merged.Count > maxSessions)
+        {
+            merged.Remove(merged.Keys.First());
+        }
+        _reportRequested = true;
+        Change(c =>
+        {
+            c.SquadCounts = merged;
+            c.SquadNames = knownNames;
+        });
+    }
+
+    /// <summary>Active ou coupe la synchro squad et change le code ; synchronise tout de suite.</summary>
+    public void SetSquad(bool enabled, string? code)
+    {
+        _reportRequested = true;
+        Change(c =>
+        {
+            c.SquadSync = enabled;
+            c.SquadCode = code;
+        });
+        Squad.Kick();
+    }
+
     /// <summary>Máximo de cofres añadidos a mano (el mismo que en Ajustes).</summary>
     public const int MaxInitialChests = 1_000_000;
 
@@ -371,9 +498,17 @@ public sealed class Monitor
                 }
             }
 
-            MatchLine Line(MatchRecord m, bool isLive) => new(m.SessionId, (m.MatchStartUtc ?? m.AnalyzedAtUtc).ToLocalTime(),
-                m.Playlist, m.Placement, m.OwnChests, isLive,
-                m.Teammates?.Select(t => new MateLine(t.Key, t.Name, MatchRecord.SeenRaw(t, kinds), t.Override)).ToList());
+            MatchLine Line(MatchRecord m, bool isLive)
+            {
+                Dictionary<string, int>? squad = null;
+                if (_config.SquadSync)
+                {
+                    _config.SquadCounts?.TryGetValue(m.SessionId, out squad);
+                }
+                return new(m.SessionId, (m.MatchStartUtc ?? m.AnalyzedAtUtc).ToLocalTime(), m.Playlist, m.Placement, m.OwnChests, isLive,
+                    m.Teammates?.Select(t => new MateLine(t.Key, t.Name, MatchRecord.SeenRaw(t, kinds), t.OverrideSynced ? null : t.Override,
+                        squad != null && squad.TryGetValue(t.Key, out var sc) ? (int?)sc : null)).ToList());
+            }
         }
         catch (InvalidOperationException)
         {
@@ -669,7 +804,7 @@ public sealed class Monitor
             return null;
         }
         var mates = (m.Teammates ?? new List<TeammateRecord>())
-            .Select(t => new TeamMember(t.Name, MatchRecord.Seen(t, kinds), t.Override != null))
+            .Select(t => new TeamMember(t.Name, MatchRecord.Seen(t, kinds), t.Override != null && !t.OverrideSynced, t.OverrideSynced))
             .OrderByDescending(t => t.Chests)
             .ToList();
         return new TeamSummary(live != null, m.OwnChests, mates, m.Teammates == null);

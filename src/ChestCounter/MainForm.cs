@@ -25,6 +25,7 @@ public sealed class MainForm : Form
     private readonly Label _currentCap;
     private readonly Label _session;
     private readonly PillButton _addButton;
+    private readonly PillButton _squadButton;
     private readonly ToolTip _tips = new();
     private readonly Label _statToday, _statBestDay, _statAverage, _statBestMatch, _statMatches, _statTreasures;
     private readonly Label _statTodayCap, _statBestDayCap, _statAverageCap, _statBestMatchCap, _statMatchesCap, _statTreasuresCap;
@@ -119,7 +120,23 @@ public sealed class MainForm : Form
             dialog.ShowDialog(this);
         };
         hero.Controls.Add(_addButton);
-        _session = Lbl(hero, "", 8.0f, FontStyle.Regular, Theme.Ink, new Point(86, 77), new Size(172, 16));
+        // « Squad » : synchro automatique des coffres exacts avec les mates qui ont le même code.
+        _squadButton = new PillButton
+        {
+            Text = L.T("Squad", "Squad"),
+            Location = new Point(83, 76),
+            Size = new Size(58, 19),
+            Radius = 8,
+            Font = Theme.Text(7.5f, FontStyle.Bold),
+            ForeColor = Theme.Mint,
+        };
+        _squadButton.Click += (_, _) =>
+        {
+            using var dialog = new SquadForm(_monitor);
+            dialog.ShowDialog(this);
+        };
+        hero.Controls.Add(_squadButton);
+        _session = Lbl(hero, "", 8.0f, FontStyle.Regular, Theme.Ink, new Point(146, 77), new Size(112, 16));
 
         // Última partida: cofres abiertos, con los detalles (rotos, tesoros, puesto, eliminaciones).
         var last = new Card { Location = new Point(LeftX, 149), Size = new Size(LeftW, 50), Radius = 12 };
@@ -474,7 +491,7 @@ public sealed class MainForm : Form
         {
             var mate = message == null && i - 1 < team.Mates.Count ? team.Mates[i - 1] : null;
             _teamNames[i].Text = mate?.Name ?? "";
-            _teamValues[i].Text = mate == null ? "" : (mate.Corrected ? "✎ " : "≥ ") + L.N(mate.Chests);
+            _teamValues[i].Text = mate == null ? "" : (mate.Synced ? "✓ " : mate.Corrected ? "✎ " : "≥ ") + L.N(mate.Chests);
             _teamNames[i].Visible = _teamValues[i].Visible = message == null;
         }
     }

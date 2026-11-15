@@ -72,7 +72,7 @@ public sealed class MatchDetailsForm : Form
         var card = new Card { Location = new Point(Pad, Pad + 68), Size = new Size(W - 2 * Pad, 46 + 34 * (MaxMates + 1)), Radius = 14, BackColor = Theme.Card };
         Controls.Add(card);
         Lbl(card, L.T("Jugador", "Player"), Theme.Text(8f), Theme.Muted, new Point(ColName, 12), new Size(ColSeen - ColName - 8, 16));
-        Lbl(card, L.T("En tu replay", "In your replay"), Theme.Text(8f), Theme.Muted, new Point(ColSeen, 12), new Size(ColFix - ColSeen - 8, 16));
+        Lbl(card, L.T("Visto / sincronizado", "Seen / synced"), Theme.Text(8f), Theme.Muted, new Point(ColSeen, 12), new Size(ColFix - ColSeen - 8, 16));
         Lbl(card, L.T("Corregido", "Corrected"), Theme.Text(8f), Theme.Muted, new Point(ColFix, 12), new Size(card.Width - ColFix - 14, 16));
 
         var row = 40;
@@ -164,7 +164,7 @@ public sealed class MatchDetailsForm : Form
         var parts = new List<string> { L.DateTimeShort(m.When) };
         if (m.Live) parts.Add(L.T("en curso", "in progress"));
         if (m.Placement is { } place) parts.Add(L.Ordinal(place));
-        var team = m.Mine + (m.Mates?.Sum(t => t.Corrected ?? t.Seen) ?? 0);
+        var team = m.Mine + (m.Mates?.Sum(t => t.Corrected ?? t.Synced ?? t.Seen) ?? 0);
         parts.Add(m.Mates is { Count: > 0 }
             ? L.F("equipo {0}", "team {0}", L.N(team))
             : L.Count(m.Mine, "cofre", "cofres", "chest", "chests"));
@@ -191,7 +191,9 @@ public sealed class MatchDetailsForm : Form
         {
             var mate = message == null && i < mates.Count ? mates[i] : null;
             _mateNames[i].Text = mate?.Name ?? "";
-            _mateSeen[i].Text = mate != null ? "≥ " + L.N(mate.Seen) : "";
+            // Synchro squad : le compte exact envoyé par le mate (✓) remplace le minimum vu dans ton replay (≥).
+            _mateSeen[i].Text = mate == null ? "" : mate.Synced is { } exact ? "✓ " + L.N(exact) : "≥ " + L.N(mate.Seen);
+            _mateSeen[i].ForeColor = mate?.Synced != null ? Theme.Green : Theme.Ink;
             _mateFix[i].Text = mate?.Corrected is { } fixedCount ? fixedCount.ToString(L.Culture) : "";
             _mateNames[i].Visible = _mateSeen[i].Visible = _mateFixBox[i].Visible = mate != null;
         }
@@ -219,7 +221,8 @@ public sealed class MatchDetailsForm : Form
         var matesTotal = 0;
         for (var i = 0; i < mates.Count; i++)
         {
-            matesTotal += i < MaxMates && Typed(i) is { } typed ? typed : mates[i].Corrected ?? mates[i].Seen;
+            // Case vide = pas de correction : le compte synchronisé, sinon celui du replay.
+            matesTotal += i < MaxMates ? Typed(i) ?? mates[i].Synced ?? mates[i].Seen : mates[i].Corrected ?? mates[i].Synced ?? mates[i].Seen;
         }
         _team.Text = L.F("Equipo: {0}  (tú {1} + compañeros {2})", "Team: {0}  (you {1} + teammates {2})",
             L.N(shown.Mine + matesTotal), L.N(shown.Mine), L.N(matesTotal));

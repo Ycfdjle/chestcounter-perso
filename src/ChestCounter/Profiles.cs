@@ -134,9 +134,13 @@ public static class Profiles
         {
             return null;
         }
-        Dictionary<string, int>? fixes = null;
+        Dictionary<string, int>? fixes = null, synced = null;
         c.MateCorrections?.TryGetValue(m.SessionId, out fixes);
-        return m.WithMateOverrides(fixes).WithExtras(c.ExtraKinds(), c.CountTeammateChests, c.CountTeammateTreasures);
+        if (c.SquadSync)
+        {
+            c.SquadCounts?.TryGetValue(m.SessionId, out synced);
+        }
+        return m.WithMateOverrides(fixes, synced).WithExtras(c.ExtraKinds(), c.CountTeammateChests, c.CountTeammateTreasures);
     }
 
     /// <summary>Estimated chests opened before the tool for a profile key ("" = before the first match).</summary>

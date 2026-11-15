@@ -75,6 +75,10 @@ public sealed class TeammateRecord
     [JsonIgnore]
     public int? Override { get; set; }
 
+    /// <summary>True si <see cref="Override"/> vient de la synchro squad (le compte exact envoyé par le mate).</summary>
+    [JsonIgnore]
+    public bool OverrideSynced { get; set; }
+
     /// <summary>Stable key of the teammate inside a match (Epic id, or the name for old matches).</summary>
     [JsonIgnore]
     public string Key => string.IsNullOrEmpty(EpicId) ? Name : EpicId;
@@ -136,20 +140,28 @@ public sealed class MatchRecord
     /// Copy whose teammates carry the counts corrected by the player (key = <see cref="TeammateRecord.Key"/>).
     /// The saved history is never changed. Returns the same match when there is nothing to correct.
     /// </summary>
-    public MatchRecord WithMateOverrides(IReadOnlyDictionary<string, int>? overrides)
+    public MatchRecord WithMateOverrides(IReadOnlyDictionary<string, int>? overrides, IReadOnlyDictionary<string, int>? synced = null)
     {
-        if (overrides == null || overrides.Count == 0 || Teammates == null || !Teammates.Any(t => overrides.ContainsKey(t.Key)))
+        bool Has(IReadOnlyDictionary<string, int>? d) => d != null && d.Count > 0 && Teammates!.Any(t => d.ContainsKey(t.Key));
+        if (Teammates == null || (!Has(overrides) && !Has(synced)))
         {
             return this;
         }
         var copy = (MatchRecord)MemberwiseClone();
-        copy.Teammates = Teammates.Select(t => new TeammateRecord
+        copy.Teammates = Teammates.Select(t =>
         {
-            Name = t.Name,
-            EpicId = t.EpicId,
-            ChestsSeen = t.ChestsSeen,
-            Kinds = t.Kinds,
-            Override = overrides.TryGetValue(t.Key, out var n) ? Math.Max(0, n) : null,
+            // La correction à la main passe avant le compte synchronisé.
+            int? manual = overrides != null && overrides.TryGetValue(t.Key, out var n) ? Math.Max(0, n) : null;
+            int? fromSquad = synced != null && synced.TryGetValue(t.Key, out var sq) ? Math.Max(0, sq) : null;
+            return new TeammateRecord
+            {
+                Name = t.Name,
+                EpicId = t.EpicId,
+                ChestsSeen = t.ChestsSeen,
+                Kinds = t.Kinds,
+                Override = manual ?? fromSquad,
+                OverrideSynced = manual == null && fromSquad != null,
+            };
         }).ToList();
         return copy;
     }
@@ -315,6 +327,21 @@ public sealed class Config
     /// Remplacée en entier à chaque changement.
     /// </summary>
     public List<TreasureHour>? TreasureHours { get; set; }
+
+    /// <summary>Synchro squad activée : l'appli envoie ses coffres et reçoit ceux des mates qui ont le même code.</summary>
+    public bool SquadSync { get; set; }
+
+    /// <summary>Code de squad partagé entre mates (lettres et chiffres). Sert de nom au canal de synchro.</summary>
+    public string? SquadCode { get; set; }
+
+    /// <summary>
+    /// Comptes exacts reçus des mates : partie (session id) → id Epic du mate → coffres. Remplacé en entier à
+    /// chaque réception.
+    /// </summary>
+    public Dictionary<string, Dictionary<string, int>> SquadCounts { get; set; } = new();
+
+    /// <summary>Pseudos des mates reçus par la synchro (id Epic → pseudo).</summary>
+    public Dictionary<string, string> SquadNames { get; set; } = new();
 
     [JsonIgnore]
     public IReadOnlyList<TreasureHour> TreasureHourList => TreasureHours ?? TreasureHour.Defaults;

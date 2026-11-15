@@ -687,7 +687,7 @@ public static class ReportWriter
             var barW = (100.0 * own / Math.Max(1, chestMax)).ToString("0.##", CultureInfo.InvariantCulture);
             var team = withMates && m.Teammates is { Count: > 0 } t
                 ? "<div class=\"mates-line\">" + string.Concat(t.OrderByDescending(x => MatchRecord.Seen(x, kinds))
-                    .Select(x => $"<span class=\"chip\"><span class=\"cn\">{H(x.Name)}</span> <b>{(x.Override != null ? "✎" : "≥")} {MatchRecord.Seen(x, kinds)}</b></span>")) + "</div>"
+                    .Select(x => $"<span class=\"chip\"><span class=\"cn\">{H(x.Name)}</span> <b>{(x.OverrideSynced ? "✓" : x.Override != null ? "✎" : "≥")} {MatchRecord.Seen(x, kinds)}</b></span>")) + "</div>"
                 : "";
             var teamCell = !withMates ? ""
                 : m.Teammates is { Count: > 0 }
@@ -820,7 +820,7 @@ public static class ReportWriter
             foreach (var m in recentTeam)
             {
                 var mates = string.Concat(m.Teammates!.OrderByDescending(t => Seen(t)).Select(t =>
-                    $"<span class=\"chip\"><span class=\"av sm-av\" style=\"background:{Tone(t.EpicId ?? t.Name)}\">{Initial(t.Name)}</span><span class=\"cn\">{H(t.Name)}</span> <b>{(t.Override != null ? "✎" : "≥")} {N(Seen(t))}</b></span>"));
+                    $"<span class=\"chip\"><span class=\"av sm-av\" style=\"background:{Tone(t.EpicId ?? t.Name)}\">{Initial(t.Name)}</span><span class=\"cn\">{H(t.Name)}</span> <b>{(t.OverrideSynced ? "✓" : t.Override != null ? "✎" : "≥")} {N(Seen(t))}</b></span>"));
                 var total = m.OwnChests + m.TeammatesSeen(extraKinds);
                 var placeClass = m.Placement switch { 1 => " win", > 0 and <= 10 => " top", _ => "" };
                 var place = m.Placement == 1 ? "🏆 " + H(Pretty.Placement(m)) : H(Pretty.Placement(m));
