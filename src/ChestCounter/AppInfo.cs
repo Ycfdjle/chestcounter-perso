@@ -7,14 +7,13 @@ public static class AppInfo
 
     public static string VersionText => $"{Version.Major}.{Version.Minor}.{Math.Max(0, Version.Build)}";
 
-    public const string Repo = "xdoofy92/ChestCounter";
+    public const string Repo = "Ycfdjle/chestcounter-perso"; // version perso : mises à jour depuis ce repo (base : xdoofy92/ChestCounter, MIT)
 
     /// <summary>
-    /// Versión modificada: las actualizaciones automáticas están desactivadas. Si no, la próxima versión oficial
-    /// de GitHub sustituiría este exe y se perderían los cambios (añadir cofres, detalle por jugador, probabilidad
-    /// del token). Para volver a activarlas, poner true.
+    /// Mises à jour activées : elles viennent des versions publiées sur le repo perso (<see cref="Repo"/>), jamais de
+    /// la version officielle. Pour publier : changer &lt;Version&gt; dans ChestCounter.csproj et pousser le tag vX.Y.Z.
     /// </summary>
-    public static readonly bool UpdatesEnabled = false;
+    public static readonly bool UpdatesEnabled = true;
     public static string RepoUrl => "https://github.com/" + Repo;
     public static string IssuesUrl => RepoUrl + "/issues";
 

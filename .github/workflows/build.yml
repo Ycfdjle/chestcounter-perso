@@ -42,5 +42,5 @@ jobs:
             gh release upload "$TAG" dist/ChestCounter.exe --clobber --repo "$GITHUB_REPOSITORY"
           else
             # No changelog in this app's releases: just the download.
-            gh release create "$TAG" dist/ChestCounter.exe --title "$TAG" --notes "Descarga **ChestCounter.exe** y ábrelo (Windows 10 / 11, sin instalación). Si ya lo tienes, se actualiza solo." --latest --repo "$GITHUB_REPOSITORY"
+            gh release create "$TAG" dist/ChestCounter.exe --title "$TAG" --notes "Télécharge **ChestCounter.exe** et ouvre-le (Windows 10 / 11, sans installation). Si tu l'as déjà, il se met à jour tout seul." --latest --repo "$GITHUB_REPOSITORY"
           fi
