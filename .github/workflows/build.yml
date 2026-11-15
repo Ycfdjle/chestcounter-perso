@@ -21,14 +21,17 @@ jobs:
           name: ChestCounter
           path: dist/ChestCounter.exe
 
-  # Only for tags: publishes the release with the GitHub CLI (no third-party action, write access only here).
+  # Publishes the release with the GitHub CLI (no third-party action, write access only here).
   release:
+    # Publie une version quand le numéro <Version> du .csproj change (sur main), ou sur un tag vX.Y.Z.
+    # Les ChestCounter installés la trouvent via « Mises à jour » et se mettent à jour tout seuls.
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: ChestCounter
@@ -36,11 +39,11 @@ jobs:
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
         run: |
+          VERSION=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' src/ChestCounter/ChestCounter.csproj | head -1)
+          TAG="v$VERSION"
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            gh release upload "$TAG" dist/ChestCounter.exe --clobber --repo "$GITHUB_REPOSITORY"
+            echo "La version $TAG existe déjà : rien à publier (change <Version> pour publier)."
           else
-            # No changelog in this app's releases: just the download.
-            gh release create "$TAG" dist/ChestCounter.exe --title "$TAG" --notes "Télécharge **ChestCounter.exe** et ouvre-le (Windows 10 / 11, sans installation). Si tu l'as déjà, il se met à jour tout seul." --latest --repo "$GITHUB_REPOSITORY"
+            gh release create "$TAG" dist/ChestCounter.exe --target "$GITHUB_SHA" --title "ChestCounter $TAG" --notes "Télécharge **ChestCounter.exe** et ouvre-le (Windows 10 / 11, sans installation). Si tu l'as déjà, il se met à jour tout seul." --latest --repo "$GITHUB_REPOSITORY"
           fi
