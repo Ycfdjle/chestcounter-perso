@@ -76,8 +76,14 @@ public sealed record MatchLine(string SessionId, DateTime When, string? Playlist
 /// Equipo de una partida para la ventana principal.
 /// <paramref name="Unknown"/>: partida analizada antes de guardar compañeros (sin datos de equipo).
 /// </summary>
+/// <summary>Un joueur dans le total de toute la squad : son total de coffres, ou une estimation (~).</summary>
+public sealed record SquadMember(string Name, long Chests, bool Estimated, bool Me);
+
 public sealed record TeamSummary(bool Live, int Mine, IReadOnlyList<TeamMember> Mates, bool Unknown)
 {
+    /// <summary>Total de toute la squad (synchro activée) : toi + mates synchronisés + estimation pour les autres.</summary>
+    public IReadOnlyList<SquadMember>? Squad { get; init; }
+
     public int MatesTotal => Mates.Sum(m => m.Chests);
     public int Total => Mine + MatesTotal;
 }
@@ -134,6 +140,7 @@ public sealed class Monitor
     private volatile string? _shownKey;
     private volatile string? _shownName;
     private DateTime _nextScan = DateTime.UtcNow;
+    private DateTime _nextLiveCheck = DateTime.UtcNow;
     private volatile UpdateInfo? _update;
     private bool _updateAnnounced;
     private volatile bool _installing;
@@ -338,6 +345,13 @@ public sealed class Monitor
             .ToList();
     }
 
+    /// <summary>Ton total de coffres, comme affiché en grand (parties + coffres ajoutés), envoyé à la squad.</summary>
+    private long SquadMyTotal(bool includeLive = false)
+    {
+        var live = includeLive && _tracker.IsLive && _tracker.LiveMatch != null && Profiles.Counted(_tracker.LiveMatch, _config) ? Profiles.Adjust(_tracker.LiveMatch, _config) : null;
+        return Profiles.View(_data, _config).Matches.Sum(m => (long)m.OwnChests) + (live?.OwnChests ?? 0) + Profiles.InitialChests(_data, _config);
+    }
+
     /// <summary>Id Epic du joueur suivi (pour ignorer ses propres messages de synchro).</summary>
     public string? SquadSelfId()
     {
@@ -369,7 +383,7 @@ public sealed class Monitor
             var items = mine.Where(m => m.SessionId.Length is > 0 and <= 128).Select(m => new { s = m.SessionId, c = m.ChestsOpened }).ToList();
             while (true)
             {
-                var json = JsonSerializer.Serialize(new { v = 1, id, n = name, m = items });
+                var json = JsonSerializer.Serialize(new { v = 1, id, n = name, t = SquadMyTotal(), m = items });
                 if (Encoding.UTF8.GetByteCount(json) <= maxBytes || items.Count == 0)
                 {
                     return json;
@@ -384,11 +398,18 @@ public sealed class Monitor
     }
 
     /// <summary>Ajoute les comptes reçus des mates (partie → id Epic → coffres) et rafraîchit si quelque chose change.</summary>
-    public void MergeSquadCounts(Dictionary<string, Dictionary<string, int>> incoming, int maxSessions, IReadOnlyDictionary<string, string>? names = null)
+    public void MergeSquadCounts(Dictionary<string, Dictionary<string, int>> incoming, int maxSessions, IReadOnlyDictionary<string, string>? names = null,
+        IReadOnlyDictionary<string, long>? totals = null)
     {
-        if (incoming.Count == 0)
+        var knownTotals = new Dictionary<string, long>(_config.SquadTotals ?? new());
+        var totalsChanged = false;
+        foreach (var (id, total) in totals ?? new Dictionary<string, long>())
         {
-            return;
+            if (!knownTotals.TryGetValue(id, out var old) || old != total)
+            {
+                knownTotals[id] = total;
+                totalsChanged = true;
+            }
         }
         var merged = new Dictionary<string, Dictionary<string, int>>(_config.SquadCounts ?? new());
         var knownNames = new Dictionary<string, string>(_config.SquadNames ?? new());
@@ -414,7 +435,7 @@ public sealed class Monitor
             }
             merged[session] = target;
         }
-        if (!changed)
+        if (!changed && !totalsChanged)
         {
             return;
         }
@@ -427,6 +448,7 @@ public sealed class Monitor
         {
             c.SquadCounts = merged;
             c.SquadNames = knownNames;
+            c.SquadTotals = knownTotals;
         });
     }
 
@@ -681,6 +703,13 @@ public sealed class Monitor
 
             try
             {
+                // Partie en cours : on regarde toutes les 3 s si Fortnite a ajouté des données au replay (lecture seule
+                // quand le fichier a grandi), au lieu d'attendre le prochain scan complet.
+                if (DateTime.UtcNow >= _nextLiveCheck)
+                {
+                    _nextLiveCheck = DateTime.UtcNow.AddSeconds(3);
+                    changed |= _tracker.UpdateLive();
+                }
                 if (DateTime.UtcNow >= _nextScan)
                 {
                     var added = _tracker.Scan();
@@ -815,7 +844,32 @@ public sealed class Monitor
                 : new TeamMember(t.Name, MatchRecord.Seen(t, kinds), t.Override != null, false))
             .OrderByDescending(t => t.Chests)
             .ToList();
-        return new TeamSummary(live != null, m.OwnChests, mates, m.Teammates == null);
+        return new TeamSummary(live != null, m.OwnChests, mates, m.Teammates == null) { Squad = _config.SquadSync ? BuildSquadTotal(m) : null };
+    }
+
+    /// <summary>
+    /// Toi + chaque mate synchronisé (son total envoyé) + une estimation pour les mates de la dernière partie qui n'ont
+    /// pas la synchro : la moyenne des totaux connus.
+    /// </summary>
+    private List<SquadMember> BuildSquadTotal(MatchRecord last)
+    {
+        var members = new List<SquadMember> { new(L.T("Tú", "You"), SquadMyTotal(includeLive: true), false, true) };
+        var names = _config.SquadNames ?? new();
+        var totals = _config.SquadTotals ?? new();
+        foreach (var (id, total) in totals)
+        {
+            members.Add(new SquadMember(names.TryGetValue(id, out var n) ? n : id, total, false, false));
+        }
+        var known = members.Select(x => x.Chests).ToList();
+        var estimate = known.Count > 0 ? (long)Math.Round(known.Average()) : 0;
+        foreach (var t in last.Teammates ?? new List<TeammateRecord>())
+        {
+            if (!totals.ContainsKey(t.Key))
+            {
+                members.Add(new SquadMember(t.Name, estimate, true, false));
+            }
+        }
+        return members;
     }
 
     /// <summary>

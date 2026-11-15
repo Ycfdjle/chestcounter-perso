@@ -343,6 +343,9 @@ public sealed class Config
     /// <summary>Pseudos des mates reçus par la synchro (id Epic → pseudo).</summary>
     public Dictionary<string, string> SquadNames { get; set; } = new();
 
+    /// <summary>Total de coffres de chaque mate synchronisé (id Epic → total affiché chez lui).</summary>
+    public Dictionary<string, long> SquadTotals { get; set; } = new();
+
     [JsonIgnore]
     public IReadOnlyList<TreasureHour> TreasureHourList => TreasureHours ?? TreasureHour.Defaults;
 

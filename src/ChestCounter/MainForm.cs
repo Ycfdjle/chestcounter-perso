@@ -41,7 +41,7 @@ public sealed class MainForm : Form
     private readonly System.Windows.Forms.Timer _hourTimer;
     private MonitorState? _lastState;
     private bool _teamShown, _pirateShown;
-    private readonly Label _teamTitle, _teamTotal, _teamMessage;
+    private readonly Label _teamTitle, _teamTotal, _teamMessage, _teamSquad;
     private readonly Label[] _teamNames = new Label[TeamColumns], _teamValues = new Label[TeamColumns];
     private const int TeamColumns = 4; // tú + hasta 3 compañeros (escuadrón)
     private MonitorState? _last;
@@ -188,7 +188,7 @@ public sealed class MainForm : Form
 
         // Equipo (con «Compañeros» activado): tus cofres y los vistos de cada compañero en la partida actual o la última.
         // Solo se ve con la opción activada; entonces la ventana crece para hacerle sitio.
-        _teamCard = new Card { Location = new Point(LeftX, 334), Size = new Size(RightX + RightW - LeftX, 74), Radius = 14, Visible = false };
+        _teamCard = new Card { Location = new Point(LeftX, 334), Size = new Size(RightX + RightW - LeftX, 92), Radius = 14, Visible = false };
         _teamTitle = Lbl(_teamCard, L.T("Equipo", "Team"), 7.5f, FontStyle.Regular, Theme.Muted, new Point(13, 7), new Size(250, 14));
         _teamTotal = Lbl(_teamCard, "", 8.0f, FontStyle.Bold, Theme.Ink, new Point(_teamCard.Width - 13 - 300, 6), new Size(300, 15), ContentAlignment.TopRight);
         var colW = (_teamCard.Width - 26) / TeamColumns;
@@ -198,6 +198,8 @@ public sealed class MainForm : Form
             _teamValues[i] = Lbl(_teamCard, "", 14f, FontStyle.Bold, i == 0 ? Theme.Amber : Theme.Ink, new Point(12 + i * colW, 42), new Size(colW - 10, 26));
         }
         _teamMessage = Lbl(_teamCard, "", 8.0f, FontStyle.Regular, Theme.Muted, new Point(13 + colW, 28), new Size(_teamCard.Width - 26 - colW, 40), ContentAlignment.MiddleLeft);
+        // Synchro squad : total de toute la squad (toi + mates synchronisés + estimation pour les autres).
+        _teamSquad = Lbl(_teamCard, "", 8.0f, FontStyle.Bold, Theme.Cyan, new Point(13, 70), new Size(_teamCard.Width - 26, 16));
         Controls.Add(_teamCard);
         Clickable(_teamCard, OpenMatchDetails);
 
@@ -247,7 +249,7 @@ public sealed class MainForm : Form
         };
     }
 
-    private const int DesignW = 592, DesignHBase = 332, DesignHTeam = 416;
+    private const int DesignW = 592, DesignHBase = 332, DesignHTeam = 434;
     /// <summary>Alto de la tarjeta del token (tres líneas: estado, probabilidad y cofres contados).</summary>
     private const int PirateH = 42;
     private int _designH = DesignHBase;
@@ -475,8 +477,14 @@ public sealed class MainForm : Form
         }
         _teamTitle.Text = team.Live ? L.T("Equipo · partida actual", "Team · current match") : L.T("Equipo · última partida", "Team · last match");
         _teamTitle.ForeColor = team.Live ? Theme.Mint : Theme.Muted;
-        _teamNames[0].Text = L.T("Tú", "You");
+        // Couronne ♛ sur celui qui a ouvert le plus de coffres dans la partie (s'il y en a un seul en tête).
+        var best = Math.Max(team.Mine, team.Mates.Count > 0 ? team.Mates.Max(x => x.Chests) : 0);
+        var leaders = (team.Mine == best ? 1 : 0) + team.Mates.Count(x => x.Chests == best);
+        bool Crown(int chests) => best > 0 && leaders == 1 && chests == best && team.Mates.Count > 0;
+        _teamNames[0].Text = (Crown(team.Mine) ? "♛ " : "") + L.T("Tú", "You");
+        _teamNames[0].ForeColor = Crown(team.Mine) ? Theme.Amber : Theme.Muted;
         _teamValues[0].Text = L.N(team.Mine);
+        _teamSquad.Text = SquadLine(team.Squad);
 
         var message = team.Unknown
             ? L.T("Partida analizada antes de guardar compañeros.", "Match analyzed before teammates were saved.")
@@ -492,7 +500,9 @@ public sealed class MainForm : Form
         for (var i = 1; i < TeamColumns; i++)
         {
             var mate = message == null && i - 1 < team.Mates.Count ? team.Mates[i - 1] : null;
-            _teamNames[i].Text = mate?.Name ?? "";
+            _teamNames[i].Text = mate == null ? "" : (Crown(mate.Chests) ? "♛ " : "") + mate.Name;
+            _teamNames[i].ForeColor = mate != null && Crown(mate.Chests) ? Theme.Amber : Theme.Muted;
+            _teamValues[i].ForeColor = mate != null && Crown(mate.Chests) ? Theme.Amber : Theme.Ink;
             _teamValues[i].Text = mate == null ? "" : (mate.Synced ? "✓ " : mate.Corrected ? "✎ " : "≥ ") + L.N(mate.Chests);
             _teamNames[i].Visible = _teamValues[i].Visible = message == null;
         }
@@ -566,6 +576,25 @@ public sealed class MainForm : Form
         }
         _pirateLabel.Text = chance.Length > 0 ? chance + "\n" + hour : hour;
         _pirateLabel.ForeColor = active != null ? Theme.Amber : Theme.Muted;
+    }
+
+    /// <summary>
+    /// « Toute la squad : 12 450 coffres · ♛ Pseudo 4 000 · Toi 3 142 · Pseudo3 ~3 447 ». ~ = estimation (mate sans
+    /// la synchro : moyenne des totaux connus).
+    /// </summary>
+    private static string SquadLine(IReadOnlyList<SquadMember>? squad)
+    {
+        if (squad == null || squad.Count == 0)
+        {
+            return "";
+        }
+        var total = squad.Sum(x => x.Chests);
+        var anyEstimate = squad.Any(x => x.Estimated);
+        var sorted = squad.OrderByDescending(x => x.Chests).ToList();
+        var parts = sorted.Select((x, i) => (i == 0 && x.Chests > 0 && (sorted.Count == 1 || sorted[1].Chests < x.Chests) ? "♛ " : "")
+            + x.Name + " " + (x.Estimated ? "~" : "") + x.Chests.ToString("#,0", L.Culture));
+        return L.F("Toda la squad: {0}{1} cofres", "Whole squad: {0}{1} chests", anyEstimate ? "~" : "", total.ToString("#,0", L.Culture))
+            + "  ·  " + string.Join("  ·  ", parts);
     }
 
     /// <summary>Detalle por jugador de las últimas partidas (clic en «Última partida» o en «Equipo»).</summary>

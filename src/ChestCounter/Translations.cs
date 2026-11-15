@@ -436,5 +436,6 @@ internal static class Translations
         ["Error de sincronización (ver errors.log)."] = new[] { "", "", "Erreur de synchro (voir errors.log).", "", "", "", "", "" },
         ["Visto / sincronizado"] = new[] { "", "", "Vu / synchronisé", "", "", "", "", "" },
         ["Squad: {0} cofres en total"] = new[] { "", "", "Squad : {0} coffres au total", "", "", "", "", "" },
+        ["Toda la squad: {0}{1} cofres"] = new[] { "", "", "Toute la squad : {0}{1} coffres", "", "", "", "", "" },
     };
 }

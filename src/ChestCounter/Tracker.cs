@@ -499,7 +499,8 @@ public sealed class Tracker
             return started;
         }
 
-        var interval = TimeSpan.FromSeconds(Math.Max(10, _config.LiveIntervalSeconds));
+        // Relu dès que Fortnite a ajouté des données (le fichier a grandi), au plus toutes les 3 s.
+        var interval = TimeSpan.FromSeconds(3);
         if (file.Length == _liveSize || DateTime.UtcNow - _liveParsedUtc < interval)
         {
             return started;

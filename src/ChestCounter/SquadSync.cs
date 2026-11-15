@@ -17,7 +17,9 @@ public sealed class SquadSync
     private const int MaxMessageBytes = 3800;   // ntfy.sh : au-delà de 4096 octets, le message devient une pièce jointe
     private const int MaxMatchesSent = 40;
     private const int MaxSessionsKept = 600;
-    private static readonly TimeSpan PollEvery = TimeSpan.FromSeconds(60);
+    // ntfy.sh : 1 requête toutes les 5 s en continu, 250 messages par jour. Lire toutes les 10 s reste dessous ;
+    // on n'envoie qu'à la fin d'une partie (et toutes les 2 h), pas pendant.
+    private static readonly TimeSpan PollEvery = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan RepublishEvery = TimeSpan.FromHours(2);
 
     private static readonly HttpClient Http = NewClient();
@@ -140,6 +142,7 @@ public sealed class SquadSync
         var me = _monitor.SquadSelfId();
         var incoming = new Dictionary<string, Dictionary<string, int>>();
         var names = new Dictionary<string, string>();
+        var totals = new Dictionary<string, long>();
         foreach (var line in body.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             if (Parse(line) is not { } msg || msg.Id == me)
@@ -147,6 +150,10 @@ public sealed class SquadSync
                 continue;
             }
             names[msg.Id] = msg.Name;
+            if (msg.Total is { } total)
+            {
+                totals[msg.Id] = total;
+            }
             foreach (var (session, chests) in msg.Matches)
             {
                 if (!incoming.TryGetValue(session, out var perMate))
@@ -156,7 +163,7 @@ public sealed class SquadSync
                 perMate[msg.Id] = chests; // le message le plus récent l'emporte (ils arrivent dans l'ordre)
             }
         }
-        _monitor.MergeSquadCounts(incoming, MaxSessionsKept, names);
+        _monitor.MergeSquadCounts(incoming, MaxSessionsKept, names, totals);
 
         // Résumé pour la fenêtre : pseudo → parties connues (tout ce qui est gardé, pas seulement les 12 h).
         var known = _monitor.Config.SquadCounts;
@@ -173,7 +180,7 @@ public sealed class SquadSync
         Mates = summary;
     }
 
-    private sealed record Message(string Id, string Name, List<(string Session, int Chests)> Matches);
+    private sealed record Message(string Id, string Name, List<(string Session, int Chests)> Matches, long? Total);
 
     /// <summary>
     /// Lit une ligne de ntfy.sh ({"event":"message","message":"..."}) et le message de ChestCounter qu'elle porte.
@@ -226,7 +233,8 @@ public sealed class SquadSync
                     matches.Add((session, chests));
                 }
             }
-            return new Message(id, name.Length > 0 ? name : id, matches);
+            long? total = m.TryGetProperty("t", out var tEl) && tEl.ValueKind == JsonValueKind.Number && tEl.TryGetInt64(out var t) && t is >= 0 and <= 10_000_000 ? t : null;
+            return new Message(id, name.Length > 0 ? name : id, matches, total);
         }
         catch (JsonException)
         {
